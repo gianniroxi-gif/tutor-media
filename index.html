@@ -196,6 +196,10 @@
     <label class="switch"><input type="checkbox" id="autoOsm" checked><i></i></label>
   </div>
   <div class="field">
+    <label>Solo autostrade e superstrade</label>
+    <label class="switch"><input type="checkbox" id="osmMoto" checked><i></i></label>
+  </div>
+  <div class="field">
     <label>Raggio di ricerca (km)</label>
     <input type="number" id="osmRadius" min="10" max="150" step="10" value="60">
   </div>
@@ -272,7 +276,8 @@ async function save(){
     tutors:S.tutors.filter(t=>t.src!=="demo"),
     settings:{limit:els.limit.value, autoReset:els.autoReset.checked,
               radius:els.radius.value, sound:els.sound.checked, wake:els.wake.checked,
-              autoOsm:els.autoOsm.checked, osmRadius:els.osmRadius.value}
+              autoOsm:els.autoOsm.checked, osmRadius:els.osmRadius.value,
+              osmMoto:$("osmMoto").checked}
   });
   try{ if(window.storage) await window.storage.set("tutor-media-data", data); }catch(e){}
 }
@@ -291,6 +296,7 @@ async function load(){
         els.wake.checked = d.settings.wake ?? true;
         els.autoOsm.checked = d.settings.autoOsm ?? true;
         els.osmRadius.value = d.settings.osmRadius ?? 60;
+        $("osmMoto").checked = d.settings.osmMoto ?? true;
       }
     }
   }catch(e){}
@@ -434,7 +440,15 @@ async function fetchOSMTutors(lat, lon, radiusKm, silent){
   const r = Math.round((radiusKm||60)*1000);
   els.osmBtn.disabled = true;
   els.osmStatus.textContent = "Ricerca portali entro "+radiusKm+" km…";
-  const query = `[out:json][timeout:40];
+  const onlyMoto = $("osmMoto").checked;
+  const query = onlyMoto ? `[out:json][timeout:50];
+way["highway"~"^(motorway|motorway_link|trunk|trunk_link)$"](around:${r},${lat},${lon})->.mw;
+(
+  node(around.mw:150)["highway"="speed_camera"];
+  relation(around.mw:300)["type"="enforcement"];
+);
+(._;>;);
+out body;` : `[out:json][timeout:40];
 (
   node(around:${r},${lat},${lon})["highway"="speed_camera"];
   relation(around:${r},${lat},${lon})["type"="enforcement"];
@@ -481,8 +495,8 @@ out body;`;
     const isCam = el.tags && el.tags.highway==="speed_camera";
     const relName = enfNodeIds.get(el.id);
     if(!isCam && !relName) continue;
-    const name = (el.tags && (el.tags.name || el.tags.ref)) || relName ||
-      (el.tags && el.tags.maxspeed ? "Tutor ("+el.tags.maxspeed+" km/h)" : "Tutor OSM");
+    const name = relName || (el.tags && (el.tags.name || el.tags.ref)) ||
+      (el.tags && el.tags.maxspeed ? "Portale ("+el.tags.maxspeed+" km/h)" : "Portale OSM");
     found.push({name, lat:el.lat, lon:el.lon});
   }
 
@@ -714,6 +728,8 @@ $("osmClear").onclick = ()=>{
 };
 [els.limit, els.radius, els.osmRadius].forEach(i=> i.onchange = ()=>{ updateUI(); save(); });
 [els.autoReset, els.sound, els.autoOsm].forEach(i=> i.onchange = save);
+$("osmMoto").onchange = ()=>{ save();
+  els.osmStatus.textContent = "Filtro cambiato: usa «Rimuovi i punti scaricati» e riscarica."; };
 els.wake.onchange = ()=>{
   if(els.wake.checked && S.watching) reqWakeLock();
   else if(S.wakeLock){ S.wakeLock.release().catch(()=>{}); S.wakeLock=null; }
