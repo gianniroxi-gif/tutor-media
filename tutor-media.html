@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0B0F14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<title>Tutor Media — velocità media tra i portali</title>
+<style>
+  :root{
+    --bg:#0B0F14; --panel:#121A23; --panel2:#0F151D; --line:#1E2933;
+    --txt:#E8EEF4; --muted:#8A97A5;
+    --ok:#38D177; --warn:#F5B93E; --over:#FF4D4D; --accent:#4DA3FF;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-variant-numeric:tabular-nums;
+    padding:14px 14px 90px; max-width:520px; margin:0 auto;
+  }
+  header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  header h1{font-size:17px; font-weight:700; letter-spacing:.04em;}
+  header h1 span{color:var(--accent);}
+  .gps{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted);}
+  .dot{width:9px; height:9px; border-radius:50%; background:#555;}
+  .dot.on{background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 1.6s infinite;}
+  .dot.bad{background:var(--over);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px;}
+  .label{font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:4px;}
+
+  /* Numero grande media */
+  .avgBox{text-align:center; padding:20px 16px 14px; position:relative; overflow:hidden;}
+  .avgVal{font-size:min(29vw,120px); font-weight:800; line-height:1;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:var(--ok); transition:color .3s;}
+  .avgVal.warn{color:var(--warn);} .avgVal.over{color:var(--over);}
+  .avgUnit{font-size:14px; color:var(--muted); margin-top:2px;}
+  .limitBar{height:8px; border-radius:4px; background:var(--panel2); margin-top:16px; position:relative;}
+  .limitFill{height:100%; border-radius:4px; background:var(--ok); width:0%; transition:width .4s,background .3s;}
+  .limitFill.warn{background:var(--warn);} .limitFill.over{background:var(--over);}
+  .limitTick{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--txt); opacity:.7; left:100%;}
+  .avgMeta{display:flex; justify-content:space-around; margin-top:14px; font-size:13px; color:var(--muted);}
+  .avgMeta b{color:var(--txt); font-size:16px; display:block;}
+
+  .row{display:flex; gap:12px;}
+  .row .card{flex:1; margin-bottom:12px;}
+  .bigish{font-size:34px; font-weight:700; font-family:ui-monospace,Menlo,monospace;}
+  .small{font-size:13px; color:var(--muted); margin-top:2px;}
+
+  .banner{display:none; background:var(--over); color:#fff; border-radius:14px;
+    padding:14px; text-align:center; font-weight:800; font-size:18px; margin-bottom:12px;
+    animation:pulse .8s infinite;}
+  .banner.show{display:block;}
+  .toast{position:fixed; left:50%; bottom:96px; transform:translateX(-50%);
+    background:var(--accent); color:#04121f; font-weight:700; padding:10px 18px;
+    border-radius:999px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .3s; z-index:50;}
+  .toast.show{opacity:1;}
+
+  button{font:inherit; border:0; border-radius:12px; padding:14px; font-weight:700; cursor:pointer;}
+  .btnRow{display:flex; gap:10px; margin-bottom:12px;}
+  .btnRow button{flex:1;}
+  .primary{background:var(--accent); color:#04121f;}
+  .ghost{background:var(--panel); color:var(--txt); border:1px solid var(--line);}
+  .danger{background:#3a1519; color:var(--over); border:1px solid #5a2026;}
+  button:active{transform:scale(.97);}
+
+  .field{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line); gap:10px;}
+  .field:last-child{border-bottom:0;}
+  .field label{font-size:14px;}
+  .field input[type=number], .field input[type=text]{
+    background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+    border-radius:8px; padding:8px 10px; width:90px; font:inherit; text-align:right;}
+  .field input[type=text]{width:130px; text-align:left;}
+  .switch{position:relative; width:46px; height:26px; flex-shrink:0;}
+  .switch input{display:none;}
+  .switch i{position:absolute; inset:0; background:var(--panel2); border:1px solid var(--line); border-radius:999px; transition:.2s;}
+  .switch i::after{content:""; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:var(--muted); transition:.2s;}
+  .switch input:checked+i{background:var(--ok); border-color:var(--ok);}
+  .switch input:checked+i::after{left:22px; background:#fff;}
+
+  details summary{cursor:pointer; font-size:14px; font-weight:700; padding:4px 0; color:var(--accent); list-style:none;}
+  details summary::before{content:"▸ ";}
+  details[open] summary::before{content:"▾ ";}
+  .tutorItem{display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;}
+  .tutorItem .coords{font-size:11px; color:var(--muted); font-family:ui-monospace,Menlo,monospace;}
+  .tutorItem button{padding:6px 10px; font-size:12px;}
+  .note{font-size:12px; color:var(--muted); line-height:1.5; margin-top:10px;}
+  .note a{color:var(--accent);}
+  .addRow{display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;}
+  .addRow input{flex:1; min-width:70px; background:var(--panel2); border:1px solid var(--line);
+    color:var(--txt); border-radius:8px; padding:8px; font:inherit; font-size:13px;}
+  #map{height:300px; border-radius:12px; margin-top:10px; background:var(--panel2); display:none;}
+  #map.on{display:block;}
+  .mapCtl{display:flex; gap:8px; margin-top:8px;}
+  .mapCtl button{flex:1; font-size:13px; padding:10px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TUTOR<span>·</span>MEDIA</h1>
+  <div class="gps"><span class="dot" id="gpsDot"></span><span id="gpsTxt">GPS spento</span></div>
+</header>
+
+<div class="banner" id="banner">⚠️ MEDIA SUPERATA — RALLENTA</div>
+
+<div class="card" id="permNote" style="display:none; border-color:var(--over);">
+  <div class="label" style="color:var(--over);">GPS non disponibile</div>
+  <p class="note" style="margin-top:4px;">
+    Il permesso di posizione è stato negato. Se stai guardando l'app nell'<b>anteprima di Claude</b>,
+    è normale: l'anteprima blocca il GPS. Apri il file direttamente in <b>Safari o Chrome</b>
+    (o installala come app) e concedi il permesso di posizione.
+    Nel frattempo puoi provare tutto con la <b>Modalità demo</b> qui sotto.
+  </p>
+</div>
+
+<div class="card avgBox">
+  <div class="label">Velocità media dall'ultimo tutor</div>
+  <div class="avgVal" id="avgVal">--</div>
+  <div class="avgUnit">km/h · limite medio impostato: <b id="limShow">130</b> km/h</div>
+  <div class="limitBar"><div class="limitFill" id="limFill"></div><div class="limitTick"></div></div>
+  <div class="avgMeta">
+    <div><b id="elapsed">00:00</b>tempo tratta</div>
+    <div><b id="dist">0.0 km</b>distanza</div>
+    <div><b id="delta">—</b>vs limite</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="card">
+    <div class="label">Istantanea</div>
+    <div class="bigish" id="instVal">--</div>
+    <div class="small">km/h (GPS)</div>
+  </div>
+  <div class="card">
+    <div class="label">Tutor più vicino</div>
+    <div class="bigish" id="nearDist">--</div>
+    <div class="small" id="nearName">nessun punto in zona</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Mappa portali</div>
+  <div id="map"></div>
+  <div class="mapCtl">
+    <button class="ghost" id="mapToggle">🗺 Mostra mappa</button>
+    <button class="ghost" id="mapFollow" style="display:none;">🎯 Segui posizione: ON</button>
+  </div>
+</div>
+
+<div class="btnRow">
+  <button class="primary" id="startBtn">▶ Avvia GPS</button>
+  <button class="ghost" id="resetBtn">⟲ Passaggio tutor</button>
+</div>
+
+<div class="card">
+  <div class="label">Impostazioni</div>
+  <div class="field">
+    <label>Limite media (km/h)</label>
+    <input type="number" id="limitInput" min="30" max="150" step="5" value="130">
+  </div>
+  <div class="field">
+    <label>Modalità demo (simula la guida)</label>
+    <label class="switch"><input type="checkbox" id="demoOn"><i></i></label>
+  </div>
+  <div class="field">
+    <label>Reset automatico ai tutor salvati</label>
+    <label class="switch"><input type="checkbox" id="autoReset" checked><i></i></label>
+  </div>
+  <div class="field">
+    <label>Raggio di rilevamento (m)</label>
+    <input type="number" id="radiusInput" min="50" max="500" step="10" value="150">
+  </div>
+  <div class="field">
+    <label>Avviso sonoro + vibrazione</label>
+    <label class="switch"><input type="checkbox" id="soundOn" checked><i></i></label>
+  </div>
+  <div class="field">
+    <label>Schermo sempre acceso</label>
+    <label class="switch"><input type="checkbox" id="wakeOn" checked><i></i></label>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Database tutor automatico</div>
+  <div class="field">
+    <label>Scarica da OpenStreetMap all'avvio del GPS</label>
+    <label class="switch"><input type="checkbox" id="autoOsm" checked><i></i></label>
+  </div>
+  <div class="field">
+    <label>Solo autostrade e superstrade</label>
+    <label class="switch"><input type="checkbox" id="osmMoto" checked><i></i></label>
+  </div>
+  <div class="field">
+    <label>Raggio di ricerca (km)</label>
+    <input type="number" id="osmRadius" min="10" max="150" step="10" value="60">
+  </div>
+  <button class="primary" id="osmBtn" style="width:100%; margin-top:10px;">⬇ Scarica tutor nella zona</button>
+  <button class="ghost" id="osmClear" style="width:100%; margin-top:8px;">Rimuovi i punti scaricati</button>
+  <p class="note" id="osmStatus">I portali vengono cercati nel database libero OpenStreetMap
+  (telecamere e sistemi di controllo velocità media). La copertura è buona ma non garantita al 100%:
+  puoi sempre integrare a mano i punti mancanti.</p>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Punti tutor salvati (<span id="tutorCount">0</span>)</summary>
+    <div id="tutorList"></div>
+    <div class="addRow">
+      <input type="text" id="tName" placeholder="Nome (es. A1 km 254)">
+      <input type="text" id="tLat" placeholder="Lat" inputmode="decimal">
+      <input type="text" id="tLon" placeholder="Lon" inputmode="decimal">
+      <button class="ghost" id="addManual">＋</button>
+    </div>
+    <button class="primary" id="addHere" style="width:100%; margin-top:10px;">📍 Salva posizione attuale come tutor</button>
+    <p class="note">
+      Il modo più affidabile per costruire la tua mappa: quando passi sotto un portale tutor,
+      tocca «Salva posizione attuale». Dal passaggio successivo il reset sarà automatico.
+      L'elenco ufficiale e aggiornato delle tratte attive è pubblicato da
+      <a href="https://www.autostrade.it/autostrade-e-sicurezza/tutor" target="_blank">Autostrade per l'Italia</a>
+      (il sito pubblica le tratte, non le coordinate esatte dei portali).
+    </p>
+  </details>
+</div>
+
+<p class="note">
+  App di ausilio alla guida: mantiene il telefono su un supporto e non interagirci mentre guidi.
+  Rispetta sempre i limiti di velocità e la segnaletica: fanno fede solo quelli, non questa app.
+  I dati restano sul tuo dispositivo.
+</p>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+"use strict";
+
+// ---------- Stato ----------
+const S = {
+  watching:false, watchId:null,
+  lastFix:null,          // {lat,lon,t}
+  resetTime:null,        // ms epoch inizio tratta
+  distM:0,               // metri percorsi dalla tratta
+  instKmh:null,
+  tutors:[],             // {id,name,lat,lon}
+  lastAutoReset:0,
+  lastBeep:0,
+  wakeLock:null,
+  audioCtx:null
+};
+
+const $ = id => document.getElementById(id);
+const els = {
+  dot:$("gpsDot"), gpsTxt:$("gpsTxt"), banner:$("banner"), toast:$("toast"),
+  avg:$("avgVal"), limShow:$("limShow"), limFill:$("limFill"),
+  elapsed:$("elapsed"), dist:$("dist"), delta:$("delta"),
+  inst:$("instVal"), nearDist:$("nearDist"), nearName:$("nearName"),
+  startBtn:$("startBtn"), resetBtn:$("resetBtn"),
+  limit:$("limitInput"), autoReset:$("autoReset"), radius:$("radiusInput"),
+  sound:$("soundOn"), wake:$("wakeOn"),
+  list:$("tutorList"), count:$("tutorCount"),
+  autoOsm:$("autoOsm"), osmRadius:$("osmRadius"), osmBtn:$("osmBtn"), osmStatus:$("osmStatus")
+};
+
+// ---------- Persistenza (con fallback in memoria) ----------
+async function save(){
+  const data = JSON.stringify({
+    tutors:S.tutors.filter(t=>t.src!=="demo"),
+    settings:{limit:els.limit.value, autoReset:els.autoReset.checked,
+              radius:els.radius.value, sound:els.sound.checked, wake:els.wake.checked,
+              autoOsm:els.autoOsm.checked, osmRadius:els.osmRadius.value,
+              osmMoto:$("osmMoto").checked}
+  });
+  try{ if(window.storage) await window.storage.set("tutor-media-data", data); }catch(e){}
+}
+async function load(){
+  try{
+    if(!window.storage) return;
+    const r = await window.storage.get("tutor-media-data");
+    if(r && r.value){
+      const d = JSON.parse(r.value);
+      if(Array.isArray(d.tutors)) S.tutors = d.tutors;
+      if(d.settings){
+        els.limit.value = d.settings.limit ?? 130;
+        els.autoReset.checked = d.settings.autoReset ?? true;
+        els.radius.value = d.settings.radius ?? 150;
+        els.sound.checked = d.settings.sound ?? true;
+        els.wake.checked = d.settings.wake ?? true;
+        els.autoOsm.checked = d.settings.autoOsm ?? true;
+        els.osmRadius.value = d.settings.osmRadius ?? 60;
+        $("osmMoto").checked = d.settings.osmMoto ?? true;
+      }
+    }
+  }catch(e){}
+  renderTutors(); updateUI();
+}
+
+// ---------- Geometria ----------
+function haversine(a, b){
+  const R=6371000, rad=x=>x*Math.PI/180;
+  const dLat=rad(b.lat-a.lat), dLon=rad(b.lon-a.lon);
+  const s=Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+// ---------- GPS ----------
+function startGPS(){
+  if(!navigator.geolocation){ toast("Geolocalizzazione non supportata"); return; }
+  S.watchId = navigator.geolocation.watchPosition(onFix, onErr,
+    {enableHighAccuracy:true, maximumAge:0, timeout:15000});
+  S.watching = true;
+  if(!S.resetTime) doReset(false);
+  els.startBtn.textContent = "⏸ Ferma GPS";
+  els.startBtn.classList.remove("primary"); els.startBtn.classList.add("danger");
+  els.dot.className = "dot on"; els.gpsTxt.textContent = "in ricerca…";
+  if(els.wake.checked) reqWakeLock();
+}
+function stopGPS(){
+  if(S.watchId!=null) navigator.geolocation.clearWatch(S.watchId);
+  S.watching=false; S.watchId=null; S.lastFix=null; S.instKmh=null;
+  els.startBtn.textContent = "▶ Avvia GPS";
+  els.startBtn.classList.add("primary"); els.startBtn.classList.remove("danger");
+  els.dot.className = "dot"; els.gpsTxt.textContent = "GPS spento";
+  if(S.wakeLock){ S.wakeLock.release().catch(()=>{}); S.wakeLock=null; }
+  updateUI();
+}
+function onErr(e){
+  els.dot.className = "dot bad";
+  els.gpsTxt.textContent = e.code===1 ? "permesso negato" : "segnale assente";
+  if(e.code===1) $("permNote").style.display = "block";
+}
+
+function onFix(pos){
+  const c = pos.coords;
+  $("permNote").style.display = "none";
+  handleFix({lat:c.latitude, lon:c.longitude, t:pos.timestamp, acc:c.accuracy, spd:c.speed});
+}
+
+function handleFix(f){
+  if(f.acc > 60) { els.gpsTxt.textContent = "precisione bassa ("+Math.round(f.acc)+" m)"; return; }
+  els.dot.className = "dot on";
+  els.gpsTxt.textContent = S.demo ? "DEMO attiva" : "attivo ±"+Math.round(f.acc)+" m";
+
+  const fix = {lat:f.lat, lon:f.lon, t:f.t};
+  const firstFix = !S.lastFix;
+
+  // velocità istantanea: preferisci quella del chip GPS
+  if(f.spd!=null && !isNaN(f.spd)) S.instKmh = f.spd*3.6;
+  else if(S.lastFix){
+    const dt=(fix.t-S.lastFix.t)/1000;
+    if(dt>0.5) S.instKmh = haversine(S.lastFix,fix)/dt*3.6;
+  }
+
+  // distanza cumulata (filtra jitter da fermo)
+  if(S.lastFix){
+    const d = haversine(S.lastFix, fix);
+    if(d > Math.min(f.acc*0.5, 15) || (S.instKmh||0) > 5) S.distM += d;
+  }
+  S.lastFix = fix;
+
+  // il cronometro della tratta parte dal primo fix valido, non dal tocco su Avvia
+  if(firstFix){ S.resetTime = Date.now(); S.distM = 0; }
+
+  checkTutorProximity(fix);
+  if(!S.demo) maybeAutoOsm(fix);
+  updateMapUser(fix);
+  updateUI();
+}
+
+// ---------- Tutor ----------
+function nearestTutor(fix){
+  let best=null;
+  for(const t of S.tutors){
+    const d = haversine(fix, t);
+    if(!best || d < best.d) best = {t, d};
+  }
+  return best;
+}
+function checkTutorProximity(fix){
+  if(!els.autoReset.checked || !S.tutors.length) return;
+  const near = nearestTutor(fix);
+  if(near && near.d <= (+els.radius.value||150) && Date.now()-S.lastAutoReset > 60000){
+    S.lastAutoReset = Date.now();
+    doReset(true, near.t.name);
+  }
+}
+function doReset(auto, name){
+  S.resetTime = Date.now();
+  S.distM = 0;
+  hideBanner();
+  if(auto) toast("Tutor «"+name+"» — nuova media avviata");
+  updateUI();
+}
+
+function renderTutors(){
+  els.count.textContent = S.tutors.length;
+  try{ refreshMapMarkers(); }catch(e){}
+  els.list.innerHTML = S.tutors.length ? "" :
+    '<p class="note">Nessun punto salvato. Aggiungi i portali che incontri.</p>';
+  S.tutors.forEach(t=>{
+    const row = document.createElement("div");
+    row.className = "tutorItem";
+    const badge = t.src==="osm" ? ' <span style="color:var(--accent);font-size:10px;">OSM</span>' : '';
+    row.innerHTML = `<div><div>${escapeHtml(t.name)}${badge}</div>
+      <div class="coords">${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}</div></div>`;
+    const del = document.createElement("button");
+    del.className="danger"; del.textContent="Elimina";
+    del.onclick = ()=>{ S.tutors = S.tutors.filter(x=>x.id!==t.id); renderTutors(); save(); };
+    row.appendChild(del);
+    els.list.appendChild(row);
+  });
+}
+function addTutor(name, lat, lon){
+  S.tutors.push({id:Date.now()+Math.random(), name, lat, lon});
+  renderTutors(); save();
+  toast("Tutor salvato: "+name);
+}
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+// ---------- Download automatico da OpenStreetMap (Overpass API) ----------
+const OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+];
+S.osmCenter = null;   // centro dell'ultimo download riuscito
+S.osmBusy = false;
+
+async function fetchOSMTutors(lat, lon, radiusKm, silent){
+  if(S.osmBusy) return;
+  S.osmBusy = true;
+  const r = Math.round((radiusKm||60)*1000);
+  els.osmBtn.disabled = true;
+  els.osmStatus.textContent = "Ricerca portali entro "+radiusKm+" km…";
+  const onlyMoto = $("osmMoto").checked;
+  const query = onlyMoto ? `[out:json][timeout:50];
+way["highway"~"^(motorway|motorway_link|trunk|trunk_link)$"](around:${r},${lat},${lon})->.mw;
+(
+  node(around.mw:150)["highway"="speed_camera"];
+  relation(around.mw:300)["type"="enforcement"];
+);
+(._;>;);
+out body;` : `[out:json][timeout:40];
+(
+  node(around:${r},${lat},${lon})["highway"="speed_camera"];
+  relation(around:${r},${lat},${lon})["type"="enforcement"];
+);
+(._;>;);
+out body;`;
+
+  let data = null, lastErr = null;
+  for(const url of OVERPASS){
+    try{
+      const res = await fetch(url, {method:"POST", body:"data="+encodeURIComponent(query),
+        headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      data = await res.json();
+      break;
+    }catch(e){ lastErr = e; }
+  }
+
+  els.osmBtn.disabled = false;
+  S.osmBusy = false;
+
+  if(!data){
+    els.osmStatus.textContent = "Download non riuscito ("+(lastErr&&lastErr.message||"rete")+
+      "). Serve connessione dati; riprova o aggiungi i punti a mano.";
+    if(!silent) toast("Download OSM non riuscito");
+    return;
+  }
+
+  // Nodi utili: telecamere dichiarate + membri (device/from/to) di relazioni enforcement
+  const enfNodeIds = new Map(); // nodeId -> nome relazione
+  for(const el of data.elements){
+    if(el.type==="relation" && el.tags && el.tags.type==="enforcement"){
+      const rname = el.tags.name || el.tags.ref ||
+        (el.tags.enforcement==="average_speed" ? "Tutor (media)" : "Controllo velocità");
+      for(const m of (el.members||[])){
+        if(m.type==="node" && ["device","from","to",""].includes(m.role||""))
+          enfNodeIds.set(m.ref, rname);
+      }
+    }
+  }
+  const found = [];
+  for(const el of data.elements){
+    if(el.type!=="node" || el.lat==null) continue;
+    const isCam = el.tags && el.tags.highway==="speed_camera";
+    const relName = enfNodeIds.get(el.id);
+    if(!isCam && !relName) continue;
+    const name = relName || (el.tags && (el.tags.name || el.tags.ref)) ||
+      (el.tags && el.tags.maxspeed ? "Portale ("+el.tags.maxspeed+" km/h)" : "Portale OSM");
+    found.push({name, lat:el.lat, lon:el.lon});
+  }
+
+  // Deduplica: salta punti entro 80 m da uno già in elenco
+  let added = 0;
+  for(const p of found){
+    const dup = S.tutors.some(t => haversine(t, p) < 80);
+    if(!dup){
+      S.tutors.push({id:"osm-"+p.lat.toFixed(5)+"-"+p.lon.toFixed(5), src:"osm",
+                     name:p.name, lat:p.lat, lon:p.lon});
+      added++;
+    }
+  }
+  S.osmCenter = {lat, lon};
+  renderTutors(); save(); updateUI();
+  els.osmStatus.textContent = found.length
+    ? "Trovati "+found.length+" portali nel raggio, "+added+" nuovi aggiunti. Ultimo aggiornamento: "
+      + new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})
+    : "Nessun portale mappato in questa zona su OSM: aggiungili a mano al primo passaggio.";
+  if(!silent) toast(added ? added+" tutor aggiunti dalla zona" : "Nessun nuovo tutor trovato");
+}
+
+// riscarica automaticamente quando ci si allontana dal centro dell'ultimo download
+function maybeAutoOsm(fix){
+  if(!els.autoOsm.checked || S.osmBusy) return;
+  const rKm = +els.osmRadius.value || 60;
+  if(!S.osmCenter || haversine(S.osmCenter, fix) > rKm*1000*0.6){
+    fetchOSMTutors(fix.lat, fix.lon, rKm, true);
+  }
+}
+
+// ---------- Mappa (Leaflet) ----------
+const M = {map:null, user:null, acc:null, layer:null, follow:true, on:false, lastPan:0, loading:false};
+function loadLeaflet(cb){
+  if(typeof L!=="undefined") return cb();
+  if(M.loading) return;
+  M.loading = true;
+  const s = document.createElement("script");
+  s.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+  s.onload = ()=>{ M.loading=false; cb(); };
+  s.onerror = ()=>{ M.loading=false;
+    $("map").innerHTML = '<p class="note" style="padding:14px;">Mappa non caricabile qui '+
+      '(rete assente o anteprima con restrizioni). Aprendo l\'app nel browser funzionerà.</p>'; };
+  document.head.appendChild(s);
+}
+function initMap(){
+  if(M.map) return;
+  loadLeaflet(()=>{
+    if(M.map || typeof L==="undefined") return;
+    const c = S.lastFix || {lat:41.9, lon:12.5};
+    M.map = L.map("map", {zoomControl:true, attributionControl:true}).setView([c.lat, c.lon], S.lastFix?13:6);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {maxZoom:19, attribution:'© OpenStreetMap'}).addTo(M.map);
+    M.layer = L.layerGroup().addTo(M.map);
+    M.map.on("dragstart", ()=>{ M.follow=false; updateFollowBtn(); });
+    refreshMapMarkers();
+    if(S.lastFix) updateMapUser(S.lastFix, true);
+  });
+}
+function refreshMapMarkers(){
+  if(!M.layer) return;
+  M.layer.clearLayers();
+  for(const t of S.tutors){
+    L.circleMarker([t.lat, t.lon], {radius:7, color:"#4DA3FF", weight:2,
+      fillColor:"#4DA3FF", fillOpacity:.5})
+      .bindPopup("<b>"+escapeHtml(t.name)+"</b><br>"+t.lat.toFixed(5)+", "+t.lon.toFixed(5))
+      .addTo(M.layer);
+  }
+}
+function updateMapUser(fix, force){
+  if(!M.map || !M.on) return;
+  if(!M.user){
+    M.user = L.circleMarker([fix.lat, fix.lon], {radius:9, color:"#fff", weight:2,
+      fillColor:"#38D177", fillOpacity:1}).addTo(M.map);
+    M.acc = L.circle([fix.lat, fix.lon], {radius:30, color:"#38D177", weight:1,
+      fillOpacity:.08}).addTo(M.map);
+  }else{
+    M.user.setLatLng([fix.lat, fix.lon]);
+    M.acc.setLatLng([fix.lat, fix.lon]);
+  }
+  const now = Date.now();
+  if(M.follow && (force || now - M.lastPan > 2000)){
+    M.lastPan = now;
+    M.map.panTo([fix.lat, fix.lon], {animate:true});
+    if(force) M.map.setZoom(14);
+  }
+}
+function updateFollowBtn(){
+  $("mapFollow").textContent = "🎯 Segui posizione: " + (M.follow?"ON":"OFF");
+}
+$("mapToggle").onclick = ()=>{
+  M.on = !M.on;
+  $("map").classList.toggle("on", M.on);
+  $("mapFollow").style.display = M.on ? "" : "none";
+  $("mapToggle").textContent = M.on ? "🗺 Nascondi mappa" : "🗺 Mostra mappa";
+  if(M.on){
+    if(!M.map) setTimeout(initMap, 50);
+    else setTimeout(()=>{ M.map.invalidateSize(); if(S.lastFix) updateMapUser(S.lastFix,true); }, 50);
+  }
+};
+$("mapFollow").onclick = ()=>{ M.follow=!M.follow; updateFollowBtn();
+  if(M.follow && S.lastFix) updateMapUser(S.lastFix, true); };
+
+// ---------- UI ----------
+function fmtTime(ms){
+  const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60);
+  const mm=String(m%60).padStart(2,"0"), ss=String(s%60).padStart(2,"0");
+  return h? h+":"+mm+":"+ss : mm+":"+ss;
+}
+function isActive(){ return S.watching || S.demo; }
+function updateUI(){
+  const limit = +els.limit.value || 130;
+  els.limShow.textContent = limit;
+
+  // media
+  let avg = null;
+  if(S.resetTime && isActive()){
+    const dt = (Date.now()-S.resetTime)/1000;
+    if(dt>3 && S.distM>10) avg = (S.distM/dt)*3.6;
+    els.elapsed.textContent = fmtTime(Date.now()-S.resetTime);
+    els.dist.textContent = (S.distM/1000).toFixed(1)+" km";
+  }else{
+    els.elapsed.textContent="00:00"; els.dist.textContent="0.0 km";
+  }
+
+  els.avg.textContent = avg!=null ? Math.round(avg) : "--";
+  els.inst.textContent = (S.instKmh!=null && isActive()) ? Math.round(S.instKmh) : "--";
+
+  // stato colore + warning
+  let cls = "";
+  if(avg!=null){
+    if(avg > limit) cls="over";
+    else if(avg > limit-4) cls="warn";
+    els.delta.textContent = (avg-limit>=0?"+":"")+Math.round(avg-limit)+" km/h";
+    els.delta.style.color = cls==="over"?"var(--over)":cls==="warn"?"var(--warn)":"var(--ok)";
+  } else els.delta.textContent="—";
+
+  els.avg.className = "avgVal "+cls;
+  els.limFill.className = "limitFill "+cls;
+  els.limFill.style.width = avg!=null ? Math.min(100, avg/limit*100)+"%" : "0%";
+
+  if(cls==="over" && isActive()){ showBanner(); warnSignal(); } else hideBanner();
+
+  // tutor più vicino
+  if(S.lastFix && S.tutors.length){
+    const near = nearestTutor(S.lastFix);
+    els.nearDist.textContent = near.d<1000 ? Math.round(near.d)+" m" : (near.d/1000).toFixed(1)+" km";
+    els.nearName.textContent = near.t.name;
+  }else{
+    els.nearDist.textContent="--";
+    els.nearName.textContent = S.tutors.length? "in attesa del GPS" : "nessun punto salvato";
+  }
+}
+setInterval(()=>{ if(isActive()) updateUI(); }, 1000);
+
+function showBanner(){ els.banner.classList.add("show"); }
+function hideBanner(){ els.banner.classList.remove("show"); }
+let toastTimer;
+function toast(msg){
+  els.toast.textContent = msg; els.toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>els.toast.classList.remove("show"), 3000);
+}
+
+// ---------- Avvisi sonori ----------
+function warnSignal(){
+  if(!els.sound.checked) return;
+  const now = Date.now();
+  if(now - S.lastBeep < 5000) return;
+  S.lastBeep = now;
+  try{
+    if(!S.audioCtx) S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const ctx=S.audioCtx, o=ctx.createOscillator(), g=ctx.createGain();
+    o.type="square"; o.frequency.value=880;
+    g.gain.setValueAtTime(0.25, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.6);
+    o.connect(g).connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime+0.6);
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate([250,120,250]);
+}
+
+// ---------- Wake lock ----------
+async function reqWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      S.wakeLock = await navigator.wakeLock.request("screen");
+      S.wakeLock.addEventListener("release", ()=>{ S.wakeLock=null; });
+    }
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState==="visible" && S.watching && els.wake.checked) reqWakeLock();
+});
+
+// ---------- Eventi ----------
+els.startBtn.onclick = ()=> S.watching ? stopGPS() : startGPS();
+els.resetBtn.onclick = ()=> doReset(false);
+$("addHere").onclick = ()=>{
+  if(!S.lastFix){ toast("Avvia il GPS e attendi il segnale"); return; }
+  const name = "Tutor "+new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
+  addTutor(name, S.lastFix.lat, S.lastFix.lon);
+};
+$("addManual").onclick = ()=>{
+  const name = $("tName").value.trim() || "Tutor";
+  const lat = parseFloat($("tLat").value.replace(",", "."));
+  const lon = parseFloat($("tLon").value.replace(",", "."));
+  if(isNaN(lat)||isNaN(lon)||Math.abs(lat)>90||Math.abs(lon)>180){ toast("Coordinate non valide"); return; }
+  addTutor(name, lat, lon);
+  $("tName").value=$("tLat").value=$("tLon").value="";
+};
+els.osmBtn.onclick = ()=>{
+  const go = f => fetchOSMTutors(f.lat, f.lon, +els.osmRadius.value||60, false);
+  if(S.lastFix) go(S.lastFix);
+  else if(navigator.geolocation){
+    els.osmStatus.textContent = "Ottengo la posizione…";
+    navigator.geolocation.getCurrentPosition(
+      p => go({lat:p.coords.latitude, lon:p.coords.longitude}),
+      () => { els.osmStatus.textContent = "Posizione non disponibile: attiva il GPS."; },
+      {enableHighAccuracy:false, timeout:10000, maximumAge:600000});
+  }
+};
+$("osmClear").onclick = ()=>{
+  const n = S.tutors.filter(t=>t.src==="osm").length;
+  S.tutors = S.tutors.filter(t=>t.src!=="osm");
+  S.osmCenter = null;
+  renderTutors(); save(); updateUI();
+  toast(n+" punti OSM rimossi");
+};
+[els.limit, els.radius, els.osmRadius].forEach(i=> i.onchange = ()=>{ updateUI(); save(); });
+[els.autoReset, els.sound, els.autoOsm].forEach(i=> i.onchange = save);
+$("osmMoto").onchange = ()=>{ save();
+  els.osmStatus.textContent = "Filtro cambiato: usa «Rimuovi i punti scaricati» e riscarica."; };
+els.wake.onchange = ()=>{
+  if(els.wake.checked && S.watching) reqWakeLock();
+  else if(S.wakeLock){ S.wakeLock.release().catch(()=>{}); S.wakeLock=null; }
+  save();
+};
+
+// ---------- Modalità demo (guida simulata) ----------
+let demoTimer = null, D = null;
+function startDemo(){
+  if(S.watching) stopGPS();
+  S.demo = true;
+  D = {lat:44.500, lon:11.200, t:Date.now(), i:0};
+  // due portali virtuali più avanti sul percorso (nord): reset a ~1.5 e ~4 km
+  S.tutors = S.tutors.filter(t=>t.src!=="demo").concat([
+    {id:"demo-a", src:"demo", name:"Tutor demo A (km 1,5)", lat:D.lat+1.5/111, lon:D.lon},
+    {id:"demo-b", src:"demo", name:"Tutor demo B (km 4,0)", lat:D.lat+4.0/111, lon:D.lon}
+  ]);
+  renderTutors();
+  S.lastFix = null; S.resetTime = null; S.distM = 0; S.lastAutoReset = 0;
+  els.startBtn.disabled = true; els.startBtn.style.opacity = .5;
+  $("permNote").style.display = "none";
+  demoTimer = setInterval(()=>{
+    D.i++;
+    // velocità che oscilla tra ~112 e ~142 km/h: vedrai la media salire oltre il limite
+    const kmh = 127 + 15*Math.sin(D.i/12);
+    D.lat += (kmh/3.6)/111000;   // avanza verso nord di kmh m/s
+    D.t += 1000;
+    handleFix({lat:D.lat, lon:D.lon, t:D.t, acc:8, spd:kmh/3.6});
+  }, 1000);
+  toast("Demo: guida simulata, i tutor virtuali resettano la media");
+}
+function stopDemo(){
+  clearInterval(demoTimer); demoTimer=null;
+  S.demo = false; S.lastFix = null; S.instKmh = null; S.resetTime = null; S.distM = 0;
+  S.tutors = S.tutors.filter(t=>t.src!=="demo");
+  renderTutors();
+  els.startBtn.disabled = false; els.startBtn.style.opacity = 1;
+  els.dot.className = "dot"; els.gpsTxt.textContent = "GPS spento";
+  hideBanner(); updateUI();
+}
+$("demoOn").onchange = e => e.target.checked ? startDemo() : stopDemo();
+
+// gli errori di script esterni (anteprima sandbox) non devono bloccare l'app
+window.addEventListener("error", e => { if(e.message==="Script error.") e.preventDefault(); }, true);
+
+load();
+
+// PWA: registra il service worker solo se servito via http/https
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+})();
+</script>
+</body>
+</html>
