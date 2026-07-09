@@ -270,24 +270,29 @@ const els = {
   autoOsm:$("autoOsm"), osmRadius:$("osmRadius"), osmBtn:$("osmBtn"), osmStatus:$("osmStatus")
 };
 
-// ---------- Persistenza (con fallback in memoria) ----------
+// ---------- Persistenza (window.storage in anteprima, localStorage sul sito) ----------
+const DKEY = "tutor-media-data";
 async function save(){
   const data = JSON.stringify({
     tutors:S.tutors.filter(t=>t.src!=="demo"),
+    osm:{center:S.osmCenter, ts:S.osmTs||0},
     settings:{limit:els.limit.value, autoReset:els.autoReset.checked,
               radius:els.radius.value, sound:els.sound.checked, wake:els.wake.checked,
               autoOsm:els.autoOsm.checked, osmRadius:els.osmRadius.value,
               osmMoto:$("osmMoto").checked}
   });
-  try{ if(window.storage) await window.storage.set("tutor-media-data", data); }catch(e){}
+  try{ if(window.storage){ await window.storage.set(DKEY, data); return; } }catch(e){}
+  try{ localStorage.setItem(DKEY, data); }catch(e){}
 }
 async function load(){
+  let raw = null;
+  try{ if(window.storage){ const r = await window.storage.get(DKEY); raw = r && r.value; } }catch(e){}
+  if(!raw){ try{ raw = localStorage.getItem(DKEY); }catch(e){} }
   try{
-    if(!window.storage) return;
-    const r = await window.storage.get("tutor-media-data");
-    if(r && r.value){
-      const d = JSON.parse(r.value);
+    if(raw){
+      const d = JSON.parse(raw);
       if(Array.isArray(d.tutors)) S.tutors = d.tutors;
+      if(d.osm){ S.osmCenter = d.osm.center || null; S.osmTs = d.osm.ts || 0; }
       if(d.settings){
         els.limit.value = d.settings.limit ?? 130;
         els.autoReset.checked = d.settings.autoReset ?? true;
@@ -298,6 +303,9 @@ async function load(){
         els.osmRadius.value = d.settings.osmRadius ?? 60;
         $("osmMoto").checked = d.settings.osmMoto ?? true;
       }
+      const nOsm = S.tutors.filter(t=>t.src==="osm").length;
+      if(nOsm) els.osmStatus.textContent = nOsm+" portali in memoria"+
+        (S.osmTs? " (scaricati il "+new Date(S.osmTs).toLocaleDateString("it-IT")+")" : "")+".";
     }
   }catch(e){}
   renderTutors(); updateUI();
@@ -441,11 +449,11 @@ async function fetchOSMTutors(lat, lon, radiusKm, silent){
   els.osmBtn.disabled = true;
   els.osmStatus.textContent = "Ricerca portali entro "+radiusKm+" km…";
   const onlyMoto = $("osmMoto").checked;
-  const query = onlyMoto ? `[out:json][timeout:50];
-way["highway"~"^(motorway|motorway_link|trunk|trunk_link)$"](around:${r},${lat},${lon})->.mw;
+  const query = onlyMoto ? `[out:json][timeout:45];
+way["highway"~"^(motorway|trunk)$"](around:${r},${lat},${lon})->.mw;
 (
   node(around.mw:150)["highway"="speed_camera"];
-  relation(around.mw:300)["type"="enforcement"];
+  relation(around:${r},${lat},${lon})["type"="enforcement"];
 );
 (._;>;);
 out body;` : `[out:json][timeout:40];
@@ -456,24 +464,31 @@ out body;` : `[out:json][timeout:40];
 (._;>;);
 out body;`;
 
-  let data = null, lastErr = null;
+  let data = null; const errs = [];
   for(const url of OVERPASS){
+    const ctl = new AbortController();
+    const timer = setTimeout(()=>ctl.abort(), 30000);
     try{
       const res = await fetch(url, {method:"POST", body:"data="+encodeURIComponent(query),
-        headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+        headers:{"Content-Type":"application/x-www-form-urlencoded"}, signal:ctl.signal});
+      clearTimeout(timer);
       if(!res.ok) throw new Error("HTTP "+res.status);
       data = await res.json();
       break;
-    }catch(e){ lastErr = e; }
+    }catch(e){
+      clearTimeout(timer);
+      errs.push(e.name==="AbortError" ? "timeout" : (e.message||"rete"));
+    }
   }
 
   els.osmBtn.disabled = false;
   S.osmBusy = false;
 
   if(!data){
-    els.osmStatus.textContent = "Download non riuscito ("+(lastErr&&lastErr.message||"rete")+
-      "). Serve connessione dati; riprova o aggiungi i punti a mano.";
-    if(!silent) toast("Download OSM non riuscito");
+    els.osmStatus.textContent = "Download non riuscito ("+errs.join(", ")+"). "+
+      "I server OSM gratuiti limitano le richieste frequenti: attendi 1-2 minuti e riprova. "+
+      "I punti già scaricati restano salvati.";
+    if(!silent) toast("Server OSM occupati, riprova tra poco");
     return;
   }
 
@@ -511,6 +526,7 @@ out body;`;
     }
   }
   S.osmCenter = {lat, lon};
+  S.osmTs = Date.now();
   renderTutors(); save(); updateUI();
   els.osmStatus.textContent = found.length
     ? "Trovati "+found.length+" portali nel raggio, "+added+" nuovi aggiunti. Ultimo aggiornamento: "
@@ -519,11 +535,17 @@ out body;`;
   if(!silent) toast(added ? added+" tutor aggiunti dalla zona" : "Nessun nuovo tutor trovato");
 }
 
-// riscarica automaticamente quando ci si allontana dal centro dell'ultimo download
+// riscarica automaticamente solo se serve: prima volta, spostamento fuori zona,
+// o dati più vecchi di 7 giorni. Cooldown di 2 minuti per non far arrabbiare i server.
+S.osmLastTry = 0;
 function maybeAutoOsm(fix){
   if(!els.autoOsm.checked || S.osmBusy) return;
+  if(Date.now() - S.osmLastTry < 120000) return;
   const rKm = +els.osmRadius.value || 60;
-  if(!S.osmCenter || haversine(S.osmCenter, fix) > rKm*1000*0.6){
+  const moved = !S.osmCenter || haversine(S.osmCenter, fix) > rKm*1000*0.6;
+  const stale = (Date.now() - (S.osmTs||0)) > 7*86400000;
+  if(moved || stale){
+    S.osmLastTry = Date.now();
     fetchOSMTutors(fix.lat, fix.lon, rKm, true);
   }
 }
