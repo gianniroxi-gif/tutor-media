@@ -141,7 +141,7 @@
     <div class="small">km/h (GPS)</div>
   </div>
   <div class="card">
-    <div class="label">Tutor più vicino</div>
+    <div class="label">Prossimo tutor</div>
     <div class="bigish" id="nearDist">--</div>
     <div class="small" id="nearName">nessun punto in zona</div>
   </div>
@@ -318,6 +318,14 @@ function haversine(a, b){
   const s=Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(s));
 }
+function bearing(a, b){
+  const rad=x=>x*Math.PI/180, deg=x=>x*180/Math.PI;
+  const dLon=rad(b.lon-a.lon);
+  const y=Math.sin(dLon)*Math.cos(rad(b.lat));
+  const x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(dLon);
+  return (deg(Math.atan2(y,x))+360)%360;
+}
+function angleDiff(a, b){ const d=Math.abs(a-b)%360; return d>180 ? 360-d : d; }
 
 // ---------- GPS ----------
 function startGPS(){
@@ -367,10 +375,11 @@ function handleFix(f){
     if(dt>0.5) S.instKmh = haversine(S.lastFix,fix)/dt*3.6;
   }
 
-  // distanza cumulata (filtra jitter da fermo)
+  // distanza cumulata (filtra jitter da fermo) + direzione di marcia
   if(S.lastFix){
     const d = haversine(S.lastFix, fix);
     if(d > Math.min(f.acc*0.5, 15) || (S.instKmh||0) > 5) S.distM += d;
+    if(d > 10) S.heading = bearing(S.lastFix, fix);
   }
   S.lastFix = fix;
 
@@ -384,9 +393,15 @@ function handleFix(f){
 }
 
 // ---------- Tutor ----------
-function nearestTutor(fix){
+// aheadOnly: considera solo portali davanti a noi (entro ±80° dalla direzione di marcia)
+// e, se il punto ha una direzione salvata (hdg), solo se compatibile col nostro senso di marcia
+function nearestTutor(fix, aheadOnly){
   let best=null;
   for(const t of S.tutors){
+    if(S.heading!=null){
+      if(t.hdg!=null && angleDiff(t.hdg, S.heading) > 60) continue;   // senso opposto
+      if(aheadOnly && angleDiff(bearing(fix,t), S.heading) > 80) continue; // alle spalle
+    }
     const d = haversine(fix, t);
     if(!best || d < best.d) best = {t, d};
   }
@@ -394,11 +409,35 @@ function nearestTutor(fix){
 }
 function checkTutorProximity(fix){
   if(!els.autoReset.checked || !S.tutors.length) return;
-  const near = nearestTutor(fix);
-  if(near && near.d <= (+els.radius.value||150) && Date.now()-S.lastAutoReset > 60000){
-    S.lastAutoReset = Date.now();
+  // per il reset uso il più vicino in assoluto (senza filtro "davanti"),
+  // così il rilevamento continua anche nell'istante in cui il portale passa alle spalle
+  const near = nearestTutor(fix, false);
+  if(!near){ S.trk=null; return; }
+  const R = +els.radius.value || 150;
+  const cool = Date.now() - S.lastAutoReset > 30000;
+
+  // 1) dentro il raggio: reset immediato
+  if(cool && near.d <= R){
+    S.lastAutoReset = Date.now(); S.trk = null;
     doReset(true, near.t.name);
+    return;
   }
+  // 2) punto di massimo avvicinamento: se il portale è arrivato sotto i 300 m
+  //    e ora la distanza risale stabilmente, siamo appena passati -> reset
+  if(near.d < 450){
+    if(!S.trk || S.trk.id !== near.t.id){
+      S.trk = {id:near.t.id, name:near.t.name, minD:near.d, prevD:near.d};
+    }else{
+      S.trk.minD = Math.min(S.trk.minD, near.d);
+      if(cool && S.trk.minD < 300 && near.d > S.trk.prevD + 15 && near.d > S.trk.minD + 40){
+        S.lastAutoReset = Date.now();
+        const n = S.trk.name; S.trk = null;
+        doReset(true, n);
+        return;
+      }
+      S.trk.prevD = near.d;
+    }
+  }else S.trk = null;
 }
 function doReset(auto, name){
   S.resetTime = Date.now();
@@ -426,10 +465,12 @@ function renderTutors(){
     els.list.appendChild(row);
   });
 }
-function addTutor(name, lat, lon){
-  S.tutors.push({id:Date.now()+Math.random(), name, lat, lon});
+function addTutor(name, lat, lon, hdg){
+  const t = {id:Date.now()+Math.random(), name, lat, lon};
+  if(hdg!=null) t.hdg = Math.round(hdg);
+  S.tutors.push(t);
   renderTutors(); save();
-  toast("Tutor salvato: "+name);
+  toast("Tutor salvato: "+name+(hdg!=null?" (direzione memorizzata)":""));
 }
 function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -515,10 +556,11 @@ out body;`;
     found.push({name, lat:el.lat, lon:el.lon});
   }
 
-  // Deduplica: salta punti entro 80 m da uno già in elenco
+  // Deduplica: salta punti entro 30 m da uno già in elenco
+  // (30 m e non di più: i portali delle due carreggiate distano spesso solo 25-40 m)
   let added = 0;
   for(const p of found){
-    const dup = S.tutors.some(t => haversine(t, p) < 80);
+    const dup = S.tutors.some(t => haversine(t, p) < 30);
     if(!dup){
       S.tutors.push({id:"osm-"+p.lat.toFixed(5)+"-"+p.lon.toFixed(5), src:"osm",
                      name:p.name, lat:p.lat, lon:p.lon});
@@ -662,11 +704,16 @@ function updateUI(){
 
   if(cls==="over" && isActive()){ showBanner(); warnSignal(); } else hideBanner();
 
-  // tutor più vicino
+  // prossimo tutor (davanti a noi)
   if(S.lastFix && S.tutors.length){
-    const near = nearestTutor(S.lastFix);
-    els.nearDist.textContent = near.d<1000 ? Math.round(near.d)+" m" : (near.d/1000).toFixed(1)+" km";
-    els.nearName.textContent = near.t.name;
+    const near = nearestTutor(S.lastFix, true);
+    if(near){
+      els.nearDist.textContent = near.d<1000 ? Math.round(near.d)+" m" : (near.d/1000).toFixed(1)+" km";
+      els.nearName.textContent = near.t.name;
+    }else{
+      els.nearDist.textContent = "--";
+      els.nearName.textContent = "nessun tutor davanti";
+    }
   }else{
     els.nearDist.textContent="--";
     els.nearName.textContent = S.tutors.length? "in attesa del GPS" : "nessun punto salvato";
@@ -720,7 +767,7 @@ els.resetBtn.onclick = ()=> doReset(false);
 $("addHere").onclick = ()=>{
   if(!S.lastFix){ toast("Avvia il GPS e attendi il segnale"); return; }
   const name = "Tutor "+new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
-  addTutor(name, S.lastFix.lat, S.lastFix.lon);
+  addTutor(name, S.lastFix.lat, S.lastFix.lon, S.heading);
 };
 $("addManual").onclick = ()=>{
   const name = $("tName").value.trim() || "Tutor";
